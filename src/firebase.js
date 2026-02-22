@@ -15,7 +15,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 
 export const db      = getFirestore(app);
-export const storage = getStorage(app);
+export const storage = firebaseConfig.storageBucket ? getStorage(app) : null;
 
 // Load analytics after initial render so startup is not blocked.
 const initializeAnalytics = async () => {

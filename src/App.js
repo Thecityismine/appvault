@@ -1,7 +1,7 @@
 import { memo, useState, useMemo, useEffect, useCallback } from "react";
 import {
   collection, onSnapshot, addDoc, updateDoc, deleteDoc,
-  doc, serverTimestamp, query, orderBy, writeBatch
+  doc, serverTimestamp, query, orderBy
 } from "firebase/firestore";
 import { getDownloadURL, ref as storageRef, uploadBytes } from "firebase/storage";
 import { db, storage } from "./firebase";
@@ -9,15 +9,6 @@ import { db, storage } from "./firebase";
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const CATEGORIES = ["All", "CRE", "Finance", "Family", "Fitness", "Medical", "Pet Care", "Other"];
-
-const SAMPLE_APPS = [
-  { name: "GanttFlow",          url: "https://ganttflow.vercel.app",      description: "Project schedule management with multi-phase Gantt charts, task tracking, and export.", category: "CRE",      image: "https://images.unsplash.com/photo-1611532736597-de2d4265fba3?w=600&q=80" },
-  { name: "CRE Project Manager",url: "https://cre-pm.vercel.app",         description: "Full construction project tracker with RFIs, submittals, change orders, and budgets.",  category: "CRE",      image: "https://images.unsplash.com/photo-1486325212027-8081e485255e?w=600&q=80" },
-  { name: "Bitcoin Tracker",    url: "https://btc-tracker.vercel.app",    description: "Trade entry, P&L analytics, and performance grading for Bitcoin positions.",             category: "Finance",  image: "https://images.unsplash.com/photo-1621761191319-c6fb62004040?w=600&q=80" },
-  { name: "Budget Manager",     url: "https://budget-app.vercel.app",     description: "Household budget tracker with expense categories and monthly summaries.",                 category: "Finance",  image: "https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?w=600&q=80" },
-  { name: "Medina Family Tree", url: "https://medina-family.vercel.app",  description: "Interactive genealogy app with birthday tracking and authentication.",                   category: "Family",   image: "https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=600&q=80" },
-  { name: "Wag & Wander",       url: "https://wagwander.vercel.app",      description: "Pet care business management — bookings, client profiles, and scheduling.",              category: "Pet Care", image: "https://images.unsplash.com/photo-1548199973-03cce0bbc87b?w=600&q=80" },
-];
 
 // ─── Shared styles ────────────────────────────────────────────────────────────
 
@@ -69,6 +60,11 @@ const resolveImageUrl = (image = "", url = "") => {
 };
 
 const uploadScreenshotFile = async (file) => {
+  if (!storage) {
+    const err = new Error("Storage is not configured");
+    err.code = "storage/not-configured";
+    throw err;
+  }
   const ext = (file?.name?.split(".").pop() || "png").toLowerCase();
   const path = `app-previews/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
   const fileRef = storageRef(storage, path);
@@ -241,9 +237,18 @@ function AddModal({ onClose, onAdd }) {
     setSaveError("");
     try {
       const normalizedUrl = normalizeUrl(form.url);
-      const imageToSave = previewFile
-        ? await uploadScreenshotFile(previewFile)
-        : resolveImageUrl(previewImg || form.image, normalizedUrl);
+      let imageToSave = resolveImageUrl(previewImg || form.image, normalizedUrl);
+      if (previewFile) {
+        try {
+          imageToSave = await uploadScreenshotFile(previewFile);
+        } catch (err) {
+          const code = err?.code || "";
+          const message = String(err?.message || "");
+          const storageNotConfigured = code === "storage/not-configured" || code === "storage/no-default-bucket" || message.includes("No default bucket found");
+          if (!storageNotConfigured) throw err;
+          imageToSave = resolveImageUrl(form.image, normalizedUrl);
+        }
+      }
       await onAdd({ ...form, url: normalizedUrl, image: imageToSave });
       onClose();
     } catch (err) {
@@ -350,9 +355,18 @@ function EditModal({ app, onClose, onSave }) {
     setSaveError("");
     try {
       const normalizedUrl = normalizeUrl(form.url);
-      const imageToSave = previewFile
-        ? await uploadScreenshotFile(previewFile)
-        : resolveImageUrl(previewImg || form.image, normalizedUrl);
+      let imageToSave = resolveImageUrl(previewImg || form.image, normalizedUrl);
+      if (previewFile) {
+        try {
+          imageToSave = await uploadScreenshotFile(previewFile);
+        } catch (err) {
+          const code = err?.code || "";
+          const message = String(err?.message || "");
+          const storageNotConfigured = code === "storage/not-configured" || code === "storage/no-default-bucket" || message.includes("No default bucket found");
+          if (!storageNotConfigured) throw err;
+          imageToSave = resolveImageUrl(form.image, normalizedUrl);
+        }
+      }
       await onSave({ ...app, ...form, url: normalizedUrl, image: imageToSave });
       onClose();
     } catch (err) {
@@ -494,30 +508,15 @@ export default function AppVault() {
   // ── Firestore real-time listener ────────────────────────────────────────────
   useEffect(() => {
     const q = query(collection(db, "apps"), orderBy("createdAt", "asc"));
-    const unsub = onSnapshot(q, async (snapshot) => {
-      if (snapshot.empty) {
-        // First run — seed sample data
-        await seedSampleApps();
-      } else {
-        setApps(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-        setLoading(false);
-      }
+    const unsub = onSnapshot(q, (snapshot) => {
+      setApps(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+      setLoading(false);
     }, (err) => {
       console.error("Firestore error:", err);
       setLoading(false);
     });
     return () => unsub();
   }, []);
-
-  const seedSampleApps = async () => {
-    const batch = writeBatch(db);
-    SAMPLE_APPS.forEach(app => {
-      const ref = doc(collection(db, "apps"));
-      batch.set(ref, { ...app, createdAt: serverTimestamp() });
-    });
-    await batch.commit();
-    // snapshot listener will fire again and populate state
-  };
 
   // ── CRUD operations ─────────────────────────────────────────────────────────
   const handleAdd = useCallback(async (appData) => {
