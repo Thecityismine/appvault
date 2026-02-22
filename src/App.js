@@ -121,6 +121,16 @@ const writeLocalApps = (apps = []) => {
 
 const makeLocalId = () => `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
+const fileToDataUrl = (file) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => {
+    if (typeof reader.result === "string") resolve(reader.result);
+    else reject(new Error("Could not process image file"));
+  };
+  reader.onerror = () => reject(new Error("Could not read image file"));
+  reader.readAsDataURL(file);
+});
+
 const uploadScreenshotFile = async (file) => {
   if (!storage) {
     const err = new Error("Storage is not configured");
@@ -304,11 +314,7 @@ function AddModal({ onClose, onAdd }) {
         try {
           imageToSave = await withTimeout(uploadScreenshotFile(previewFile), OP_TIMEOUT_MS, "Image upload");
         } catch (err) {
-          const code = err?.code || "";
-          const message = String(err?.message || "");
-          const storageNotConfigured = code === "storage/not-configured" || code === "storage/no-default-bucket" || message.includes("No default bucket found");
-          if (!storageNotConfigured) throw err;
-          imageToSave = resolveImageUrl(form.image, normalizedUrl);
+          imageToSave = await withTimeout(fileToDataUrl(previewFile), OP_TIMEOUT_MS, "Image processing");
         }
       }
       await onAdd({ ...form, url: normalizedUrl, image: imageToSave });
@@ -422,11 +428,7 @@ function EditModal({ app, onClose, onSave }) {
         try {
           imageToSave = await withTimeout(uploadScreenshotFile(previewFile), OP_TIMEOUT_MS, "Image upload");
         } catch (err) {
-          const code = err?.code || "";
-          const message = String(err?.message || "");
-          const storageNotConfigured = code === "storage/not-configured" || code === "storage/no-default-bucket" || message.includes("No default bucket found");
-          if (!storageNotConfigured) throw err;
-          imageToSave = resolveImageUrl(form.image, normalizedUrl);
+          imageToSave = await withTimeout(fileToDataUrl(previewFile), OP_TIMEOUT_MS, "Image processing");
         }
       }
       await onSave({ ...app, ...form, url: normalizedUrl, image: imageToSave });
