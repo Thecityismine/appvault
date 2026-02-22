@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { memo, useState, useMemo, useEffect, useCallback } from "react";
 import {
   collection, onSnapshot, addDoc, updateDoc, deleteDoc,
   doc, serverTimestamp, query, orderBy, writeBatch
@@ -35,12 +35,38 @@ const isPersistentImageUrl = (value = "") => {
 const buildScreenshotUrl = (url = "") => {
   const normalized = normalizeUrl(url);
   if (!normalized) return "";
-  return `https://image.thum.io/get/width/1200/crop/760/noanimate/${encodeURI(normalized)}`;
+  return `https://image.thum.io/get/width/640/crop/420/noanimate/${encodeURI(normalized)}`;
 };
 
-const resolveImageUrl = (image = "", url = "") => (
-  isPersistentImageUrl(image) ? image : buildScreenshotUrl(url)
-);
+const optimizeImageUrl = (value = "") => {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+
+  if (trimmed.includes("image.thum.io/get/")) {
+    return trimmed
+      .replace(/\/width\/\d+\//, "/width/640/")
+      .replace(/\/crop\/\d+\//, "/crop/420/");
+  }
+
+  if (trimmed.includes("images.unsplash.com/")) {
+    try {
+      const url = new URL(trimmed);
+      url.searchParams.set("w", "720");
+      url.searchParams.set("q", "75");
+      url.searchParams.set("auto", "format");
+      return url.toString();
+    } catch {
+      return trimmed;
+    }
+  }
+
+  return trimmed;
+};
+
+const resolveImageUrl = (image = "", url = "") => {
+  const source = isPersistentImageUrl(image) ? image : buildScreenshotUrl(url);
+  return optimizeImageUrl(source);
+};
 
 const uploadScreenshotFile = async (file) => {
   const ext = (file?.name?.split(".").pop() || "png").toLowerCase();
@@ -77,7 +103,7 @@ function VaultLogo({ size = 36 }) {
   );
 }
 
-function AppCard({ app, onDelete, onEdit }) {
+const AppCard = memo(function AppCard({ app, onDelete, onEdit }) {
   const [imgError, setImgError] = useState(false);
   const [pressed, setPressed] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -112,7 +138,7 @@ function AppCard({ app, onDelete, onEdit }) {
       {/* Image */}
       <div style={{ position: "relative", height: "130px", background: "#0a0b14", overflow: "hidden" }}>
         {!imgError ? (
-          <img src={imageUrl} alt={app.name} onError={() => setImgError(true)}
+          <img src={imageUrl} alt={app.name} onError={() => setImgError(true)} loading="lazy" decoding="async" fetchPriority="low"
             style={{ width: "100%", height: "100%", objectFit: "cover", opacity: 0.65 }} />
         ) : (
           <div style={{
@@ -152,7 +178,7 @@ function AppCard({ app, onDelete, onEdit }) {
       </div>
     </div>
   );
-}
+});
 
 function FetchButton({ url, onResult, label = "⟳ FETCH" }) {
   const [fetching, setFetching] = useState(false);
@@ -538,7 +564,11 @@ export default function AppVault() {
           100% { box-shadow: 0 6px 24px rgba(139,92,246,0.5); }
         }
         @keyframes spin { to { transform: rotate(360deg); } }
-        .app-card { animation: fadeSlideUp 0.3s ease both; }
+        .app-card {
+          animation: fadeSlideUp 0.3s ease both;
+          content-visibility: auto;
+          contain-intrinsic-size: 250px;
+        }
 
         /* ── Responsive layout ── */
         .vault-header-inner {

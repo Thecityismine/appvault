@@ -1,7 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
-import { getAnalytics, isSupported } from "firebase/analytics";
 
 const firebaseConfig = {
   apiKey:            process.env.REACT_APP_FIREBASE_API_KEY,
@@ -18,7 +17,23 @@ const app = initializeApp(firebaseConfig);
 export const db      = getFirestore(app);
 export const storage = getStorage(app);
 
-// Analytics only loads in browser environments that support it
-isSupported().then(yes => yes && getAnalytics(app));
+// Load analytics after initial render so startup is not blocked.
+const initializeAnalytics = async () => {
+  if (typeof window === "undefined") return;
+  try {
+    const { getAnalytics, isSupported } = await import("firebase/analytics");
+    if (await isSupported()) getAnalytics(app);
+  } catch {
+    // Ignore analytics initialization errors.
+  }
+};
+
+if (typeof window !== "undefined") {
+  if ("requestIdleCallback" in window) {
+    window.requestIdleCallback(() => { void initializeAnalytics(); });
+  } else {
+    window.setTimeout(() => { void initializeAnalytics(); }, 1200);
+  }
+}
 
 export default app;
