@@ -1,7 +1,7 @@
 import { memo, useState, useMemo, useEffect, useCallback } from "react";
 import {
   collection, onSnapshot, addDoc, updateDoc, deleteDoc,
-  doc, serverTimestamp, query, orderBy
+  doc, serverTimestamp
 } from "firebase/firestore";
 import { getDownloadURL, ref as storageRef, uploadBytes } from "firebase/storage";
 import { db, storage } from "./firebase";
@@ -10,6 +10,7 @@ import { db, storage } from "./firebase";
 
 const CATEGORIES = ["All", "CRE", "Finance", "Family", "Fitness", "Medical", "Pet Care", "Other"];
 const OP_TIMEOUT_MS = 15000;
+const LOCAL_APPS_KEY = "appvault.apps.v1";
 
 // ─── Shared styles ────────────────────────────────────────────────────────────
 
@@ -73,6 +74,52 @@ const withTimeout = (promise, ms, actionLabel = "Operation") => {
     window.clearTimeout(timeoutId);
   });
 };
+
+const getTimeValue = (value) => {
+  if (!value) return 0;
+  if (typeof value === "number") return value;
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+  if (typeof value?.toMillis === "function") return value.toMillis();
+  if (typeof value?.seconds === "number") return value.seconds * 1000;
+  return 0;
+};
+
+const sortAppsByCreatedAt = (apps = []) => (
+  [...apps].sort((a, b) => getTimeValue(a.createdAt) - getTimeValue(b.createdAt))
+);
+
+const normalizeAppForStorage = (app) => ({
+  ...app,
+  createdAt: getTimeValue(app.createdAt),
+  updatedAt: getTimeValue(app.updatedAt),
+});
+
+const readLocalApps = () => {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(LOCAL_APPS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? sortAppsByCreatedAt(parsed) : [];
+  } catch {
+    return [];
+  }
+};
+
+const writeLocalApps = (apps = []) => {
+  if (typeof window === "undefined") return;
+  try {
+    const normalized = apps.map(normalizeAppForStorage);
+    window.localStorage.setItem(LOCAL_APPS_KEY, JSON.stringify(normalized));
+  } catch {
+    // Ignore local persistence errors.
+  }
+};
+
+const makeLocalId = () => `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 const uploadScreenshotFile = async (file) => {
   if (!storage) {
@@ -512,40 +559,109 @@ function HamburgerMenu({ activeCategory, setActiveCategory, onClose, apps }) {
 // ─── Main App ─────────────────────────────────────────────────────────────────
 
 export default function AppVault() {
-  const [apps, setApps] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [initialLocalApps] = useState(() => readLocalApps());
+  const [apps, setApps] = useState(initialLocalApps);
+  const [loading, setLoading] = useState(initialLocalApps.length === 0);
   const [activeCategory, setActiveCategory] = useState("All");
   const [showModal, setShowModal] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [fabPressed, setFabPressed] = useState(false);
   const [editApp, setEditApp] = useState(null);
+  const [isLocalMode, setIsLocalMode] = useState(!db);
+
+  const setAndPersistApps = useCallback((nextOrUpdater) => {
+    setApps((prev) => {
+      const next = typeof nextOrUpdater === "function" ? nextOrUpdater(prev) : nextOrUpdater;
+      const sorted = sortAppsByCreatedAt(next);
+      writeLocalApps(sorted);
+      return sorted;
+    });
+  }, []);
 
   // ── Firestore real-time listener ────────────────────────────────────────────
   useEffect(() => {
-    const q = query(collection(db, "apps"), orderBy("createdAt", "asc"));
-    const unsub = onSnapshot(q, (snapshot) => {
-      setApps(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+    if (!db || isLocalMode) {
+      setLoading(false);
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setLoading(false);
+    }, 8000);
+
+    const unsub = onSnapshot(collection(db, "apps"), (snapshot) => {
+      const remoteApps = sortAppsByCreatedAt(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
+      setApps(remoteApps);
+      writeLocalApps(remoteApps);
+      window.clearTimeout(timeoutId);
       setLoading(false);
     }, (err) => {
-      console.error("Firestore error:", err);
+      console.error("Firestore error, switching to local mode:", err);
+      window.clearTimeout(timeoutId);
+      setIsLocalMode(true);
       setLoading(false);
     });
-    return () => unsub();
-  }, []);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      unsub();
+    };
+  }, [isLocalMode]);
 
   // ── CRUD operations ─────────────────────────────────────────────────────────
   const handleAdd = useCallback(async (appData) => {
-    await withTimeout(addDoc(collection(db, "apps"), { ...appData, createdAt: serverTimestamp() }), OP_TIMEOUT_MS, "Save");
-  }, []);
+    const localApp = { ...appData, id: makeLocalId(), createdAt: Date.now() };
+    setAndPersistApps((prev) => [...prev, localApp]);
+
+    if (!db || isLocalMode) return;
+
+    try {
+      const docRef = await withTimeout(
+        addDoc(collection(db, "apps"), { ...appData, createdAt: serverTimestamp() }),
+        OP_TIMEOUT_MS,
+        "Save"
+      );
+      setAndPersistApps((prev) => prev.map((app) => (
+        app.id === localApp.id ? { ...app, id: docRef.id } : app
+      )));
+    } catch (err) {
+      console.error("Save failed, keeping local data:", err);
+      setIsLocalMode(true);
+    }
+  }, [isLocalMode, setAndPersistApps]);
 
   const handleDelete = useCallback(async (id) => {
-    await deleteDoc(doc(db, "apps", id));
-  }, []);
+    setAndPersistApps((prev) => prev.filter((app) => app.id !== id));
+
+    if (!db || isLocalMode || id.startsWith("local-")) return;
+
+    try {
+      await withTimeout(deleteDoc(doc(db, "apps", id)), OP_TIMEOUT_MS, "Delete");
+    } catch (err) {
+      console.error("Delete failed, keeping local mode:", err);
+      setIsLocalMode(true);
+    }
+  }, [isLocalMode, setAndPersistApps]);
 
   const handleSave = useCallback(async (updated) => {
     const { id, ...data } = updated;
-    await withTimeout(updateDoc(doc(db, "apps", id), { ...data, updatedAt: serverTimestamp() }), OP_TIMEOUT_MS, "Save");
-  }, []);
+    setAndPersistApps((prev) => prev.map((app) => (
+      app.id === id ? { ...app, ...data, updatedAt: Date.now() } : app
+    )));
+
+    if (!db || isLocalMode || id.startsWith("local-")) return;
+
+    try {
+      await withTimeout(
+        updateDoc(doc(db, "apps", id), { ...data, updatedAt: serverTimestamp() }),
+        OP_TIMEOUT_MS,
+        "Save"
+      );
+    } catch (err) {
+      console.error("Update failed, keeping local mode:", err);
+      setIsLocalMode(true);
+    }
+  }, [isLocalMode, setAndPersistApps]);
 
   // ── Filtering ───────────────────────────────────────────────────────────────
   const uniqueCategories = [...new Set(apps.map(a => a.category))].length;
@@ -635,6 +751,22 @@ export default function AppVault() {
 
         {/* ── Main ── */}
         <div className="vault-main">
+          {isLocalMode && (
+            <div style={{
+              marginBottom: "12px",
+              padding: "9px 12px",
+              borderRadius: "10px",
+              border: "1px solid rgba(251,191,36,0.35)",
+              background: "rgba(251,191,36,0.12)",
+              color: "rgba(255,242,204,0.95)",
+              fontFamily: "'DM Mono', monospace",
+              fontSize: "10px",
+              letterSpacing: "0.04em",
+              textTransform: "uppercase",
+            }}>
+              Cloud sync unavailable. Saving locally on this device.
+            </div>
+          )}
 
           {/* Active filter pill */}
           {activeCategory !== "All" && (
