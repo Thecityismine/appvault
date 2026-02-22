@@ -61,18 +61,18 @@ const inputStyle = {
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function VaultLogo({ size = 36 }) {
+  const logoSrc = `${process.env.PUBLIC_URL || ""}/apple-touch-icon.png`;
   return (
     <div style={{
       width: size, height: size, borderRadius: size * 0.22,
       display: "flex", alignItems: "center", justifyContent: "center",
-      flexShrink: 0, background: "rgba(255,255,255,0.08)",
-      overflow: "hidden", border: "1px solid rgba(255,255,255,0.1)",
+      flexShrink: 0, overflow: "hidden", border: "1px solid rgba(255,255,255,0.1)",
     }}>
-      <svg width={size * 0.62} height={size * 0.78} viewBox="0 0 62 78" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <rect x="0"  y="0" width="13" height="24" rx="2.5" fill="white" opacity="0.92"/>
-        <rect x="24" y="0" width="14" height="78" rx="2.5" fill="white"/>
-        <rect x="49" y="0" width="13" height="18" rx="2.5" fill="white" opacity="0.92"/>
-      </svg>
+      <img
+        src={logoSrc}
+        alt="App Vault"
+        style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+      />
     </div>
   );
 }
