@@ -485,11 +485,9 @@ function HamburgerMenu({ activeCategory, setActiveCategory, onClose, apps }) {
 export default function AppVault() {
   const [apps, setApps] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
   const [showModal, setShowModal] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
-  const [showSearch, setShowSearch] = useState(false);
   const [fabPressed, setFabPressed] = useState(false);
   const [editApp, setEditApp] = useState(null);
 
@@ -539,11 +537,8 @@ export default function AppVault() {
   const uniqueCategories = [...new Set(apps.map(a => a.category))].length;
 
   const filtered = useMemo(() => apps.filter(app => {
-    const matchCat = activeCategory === "All" || app.category === activeCategory;
-    const q = search.toLowerCase();
-    const matchSearch = !q || app.name?.toLowerCase().includes(q) || app.description?.toLowerCase().includes(q);
-    return matchCat && matchSearch;
-  }), [apps, search, activeCategory]);
+    return activeCategory === "All" || app.category === activeCategory;
+  }), [apps, activeCategory]);
 
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
@@ -610,13 +605,6 @@ export default function AppVault() {
               <div style={{ fontFamily: "'Outfit', 'DM Sans', sans-serif", fontWeight: 600, fontSize: "17px", color: "#eeeef5", letterSpacing: "0.02em", lineHeight: 1.1 }}>App Vault</div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <button onClick={() => setShowSearch(!showSearch)} style={{
-                background: showSearch ? "rgba(139,92,246,0.2)" : "rgba(255,255,255,0.06)",
-                border: showSearch ? "1px solid rgba(139,92,246,0.4)" : "1px solid rgba(255,255,255,0.08)",
-                borderRadius: "10px", width: "38px", height: "38px",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                color: showSearch ? "#a78bfa" : "rgba(255,255,255,0.5)", fontSize: "15px", cursor: "pointer",
-              }}>🔍</button>
               <button onClick={() => setShowMenu(true)} style={{
                 background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)",
                 borderRadius: "10px", width: "38px", height: "38px",
@@ -629,12 +617,6 @@ export default function AppVault() {
               </button>
             </div>
           </div>
-          {showSearch && (
-            <div style={{ paddingBottom: "12px", maxWidth: "960px", margin: "0 auto" }}>
-              <input autoFocus value={search} onChange={e => setSearch(e.target.value)}
-                placeholder="Search apps..." style={{ ...inputStyle, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }} />
-            </div>
-          )}
         </div>
 
         {/* ── Main ── */}
