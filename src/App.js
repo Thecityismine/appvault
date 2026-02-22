@@ -9,6 +9,7 @@ import { db, storage } from "./firebase";
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const CATEGORIES = ["All", "CRE", "Finance", "Family", "Fitness", "Medical", "Pet Care", "Other"];
+const OP_TIMEOUT_MS = 15000;
 
 // ─── Shared styles ────────────────────────────────────────────────────────────
 
@@ -57,6 +58,20 @@ const optimizeImageUrl = (value = "") => {
 const resolveImageUrl = (image = "", url = "") => {
   const source = isPersistentImageUrl(image) ? image : buildScreenshotUrl(url);
   return optimizeImageUrl(source);
+};
+
+const withTimeout = (promise, ms, actionLabel = "Operation") => {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = window.setTimeout(() => {
+      const err = new Error(`${actionLabel} timed out after ${Math.round(ms / 1000)}s`);
+      err.code = "timeout";
+      reject(err);
+    }, ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    window.clearTimeout(timeoutId);
+  });
 };
 
 const uploadScreenshotFile = async (file) => {
@@ -240,7 +255,7 @@ function AddModal({ onClose, onAdd }) {
       let imageToSave = resolveImageUrl(previewImg || form.image, normalizedUrl);
       if (previewFile) {
         try {
-          imageToSave = await uploadScreenshotFile(previewFile);
+          imageToSave = await withTimeout(uploadScreenshotFile(previewFile), OP_TIMEOUT_MS, "Image upload");
         } catch (err) {
           const code = err?.code || "";
           const message = String(err?.message || "");
@@ -358,7 +373,7 @@ function EditModal({ app, onClose, onSave }) {
       let imageToSave = resolveImageUrl(previewImg || form.image, normalizedUrl);
       if (previewFile) {
         try {
-          imageToSave = await uploadScreenshotFile(previewFile);
+          imageToSave = await withTimeout(uploadScreenshotFile(previewFile), OP_TIMEOUT_MS, "Image upload");
         } catch (err) {
           const code = err?.code || "";
           const message = String(err?.message || "");
@@ -520,7 +535,7 @@ export default function AppVault() {
 
   // ── CRUD operations ─────────────────────────────────────────────────────────
   const handleAdd = useCallback(async (appData) => {
-    await addDoc(collection(db, "apps"), { ...appData, createdAt: serverTimestamp() });
+    await withTimeout(addDoc(collection(db, "apps"), { ...appData, createdAt: serverTimestamp() }), OP_TIMEOUT_MS, "Save");
   }, []);
 
   const handleDelete = useCallback(async (id) => {
@@ -529,7 +544,7 @@ export default function AppVault() {
 
   const handleSave = useCallback(async (updated) => {
     const { id, ...data } = updated;
-    await updateDoc(doc(db, "apps", id), { ...data, updatedAt: serverTimestamp() });
+    await withTimeout(updateDoc(doc(db, "apps", id), { ...data, updatedAt: serverTimestamp() }), OP_TIMEOUT_MS, "Save");
   }, []);
 
   // ── Filtering ───────────────────────────────────────────────────────────────
